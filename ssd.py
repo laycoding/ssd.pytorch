@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
-from data import v2
+from data import voc, coco
 import os
 
 
@@ -19,19 +19,20 @@ class SSD(nn.Module):
 
     Args:
         phase: (string) Can be "test" or "train"
+        size: input image size
         base: VGG16 layers for input, size of either 300 or 500
         extras: extra layers that feed to multibox loc and conf layers
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, base, extras, head, num_classes):
+    def __init__(self, phase, size, base, extras, head, num_classes):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
-        # TODO: implement __call__ in PriorBox
-        self.priorbox = PriorBox(v2)
+        self.cfg = (coco, voc)[num_classes == 21]
+        self.priorbox = PriorBox(self.cfg)
         self.priors = Variable(self.priorbox.forward(), volatile=True)
-        self.size = 300
+        self.size = size
 
         # SSD network
         self.vgg = nn.ModuleList(base)
@@ -43,14 +44,14 @@ class SSD(nn.Module):
         self.conf = nn.ModuleList(head[1])
 
         if phase == 'test':
-            self.softmax = nn.Softmax()
+            self.softmax = nn.Softmax(dim=-1)
             self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
 
     def forward(self, x):
         """Applies network layers and ops on input image(s) x.
 
         Args:
-            x: input image or batch of images. Shape: [batch,3*batch,300,300].
+            x: input image or batch of images. Shape: [batch,3,300,300].
 
         Return:
             Depending on phase:
@@ -97,7 +98,8 @@ class SSD(nn.Module):
         if self.phase == "test":
             output = self.detect(
                 loc.view(loc.size(0), -1, 4),                   # loc preds
-                self.softmax(conf.view(-1, self.num_classes)),  # conf preds
+                self.softmax(conf.view(conf.size(0), -1,
+                             self.num_classes)),                # conf preds
                 self.priors.type(type(x.data))                  # default boxes
             )
         else:
@@ -112,7 +114,8 @@ class SSD(nn.Module):
         other, ext = os.path.splitext(base_file)
         if ext == '.pkl' or '.pth':
             print('Loading weights into state dict...')
-            self.load_state_dict(torch.load(base_file, map_location=lambda storage, loc: storage))
+            self.load_state_dict(torch.load(base_file,
+                                 map_location=lambda storage, loc: storage))
             print('Finished!')
         else:
             print('Sorry only .pth and .pkl files supported.')
@@ -163,7 +166,7 @@ def add_extras(cfg, i, batch_norm=False):
 def multibox(vgg, extra_layers, cfg, num_classes):
     loc_layers = []
     conf_layers = []
-    vgg_source = [24, -2]
+    vgg_source = [21, -2]
     for k, v in enumerate(vgg_source):
         loc_layers += [nn.Conv2d(vgg[v].out_channels,
                                  cfg[k] * 4, kernel_size=3, padding=1)]
@@ -194,12 +197,13 @@ mbox = {
 
 def build_ssd(phase, size=300, num_classes=21):
     if phase != "test" and phase != "train":
-        print("Error: Phase not recognized")
+        print("ERROR: Phase: " + phase + " not recognized")
         return
     if size != 300:
-        print("Error: Sorry only SSD300 is supported currently!")
+        print("ERROR: You specified size " + repr(size) + ". However, " +
+              "currently only SSD300 (size=300) is supported!")
         return
-
-    return SSD(phase, *multibox(vgg(base[str(size)], 3),
-                                add_extras(extras[str(size)], 1024),
-                                mbox[str(size)], num_classes), num_classes)
+    base_, extras_, head_ = multibox(vgg(base[str(size)], 3),
+                                     add_extras(extras[str(size)], 1024),
+                                     mbox[str(size)], num_classes)
+    return SSD(phase, size, base_, extras_, head_, num_classes)

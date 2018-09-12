@@ -5,14 +5,11 @@ https://github.com/fmassa/vision/blob/voc_dataset/torchvision/datasets/voc.py
 
 Updated by: Ellis Brown, Max deGroot
 """
-
-import os
-import os.path
+from .config import HOME
+import os.path as osp
 import sys
 import torch
 import torch.utils.data as data
-import torchvision.transforms as transforms
-from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
 if sys.version_info[0] == 2:
@@ -27,12 +24,11 @@ VOC_CLASSES = (  # always index 0
     'motorbike', 'person', 'pottedplant',
     'sheep', 'sofa', 'train', 'tvmonitor')
 
-# for making bounding boxes pretty
-COLORS = ((255, 0, 0, 128), (0, 255, 0, 128), (0, 0, 255, 128),
-          (0, 255, 255, 128), (255, 0, 255, 128), (255, 255, 0, 128))
+# note: if you used our download scripts, this should be right
+VOC_ROOT = osp.join(HOME, "data/VOCdevkit/")
 
 
-class AnnotationTransform(object):
+class VOCAnnotationTransform(object):
     """Transforms a VOC annotation into a Tensor of bbox coords and label index
     Initilized with a dictionary lookup of classnames to indexes
 
@@ -98,19 +94,21 @@ class VOCDetection(data.Dataset):
             (default: 'VOC2007')
     """
 
-    def __init__(self, root, image_sets, transform=None, target_transform=None,
+    def __init__(self, root,
+                 image_sets=[('2007', 'trainval'), ('2012', 'trainval')],
+                 transform=None, target_transform=VOCAnnotationTransform(),
                  dataset_name='VOC0712'):
         self.root = root
         self.image_set = image_sets
         self.transform = transform
         self.target_transform = target_transform
         self.name = dataset_name
-        self._annopath = os.path.join('%s', 'Annotations', '%s.xml')
-        self._imgpath = os.path.join('%s', 'JPEGImages', '%s.jpg')
+        self._annopath = osp.join('%s', 'Annotations', '%s.xml')
+        self._imgpath = osp.join('%s', 'JPEGImages', '%s.jpg')
         self.ids = list()
         for (year, name) in image_sets:
-            rootpath = os.path.join(self.root, 'VOC' + year)
-            for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
+            rootpath = osp.join(self.root, 'VOC' + year)
+            for line in open(osp.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
                 self.ids.append((rootpath, line.strip()))
 
     def __getitem__(self, index):
@@ -184,23 +182,3 @@ class VOCDetection(data.Dataset):
             tensorized version of img, squeezed
         '''
         return torch.Tensor(self.pull_image(index)).unsqueeze_(0)
-
-
-def detection_collate(batch):
-    """Custom collate fn for dealing with batches of images that have a different
-    number of associated object annotations (bounding boxes).
-
-    Arguments:
-        batch: (tuple) A tuple of tensor images and lists of annotations
-
-    Return:
-        A tuple containing:
-            1) (tensor) batch of images stacked on their 0 dim
-            2) (list of tensors) annotations for a given image are stacked on 0 dim
-    """
-    targets = []
-    imgs = []
-    for sample in batch:
-        imgs.append(sample[0])
-        targets.append(torch.FloatTensor(sample[1]))
-    return torch.stack(imgs, 0), targets

@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from data import v2 as cfg
+from data import coco as cfg
 from ..box_utils import match, log_sum_exp
+
 
 class MultiBoxLoss(nn.Module):
     """SSD Weighted Loss Function
@@ -52,7 +54,7 @@ class MultiBoxLoss(nn.Module):
                 loc shape: torch.size(batch_size,num_priors,4)
                 priors shape: torch.size(num_priors,4)
 
-            ground_truth (tensor): Ground truth boxes and labels for a batch,
+            targets (tensor): Ground truth boxes and labels for a batch,
                 shape: [batch_size,num_objs,5] (last idx is the label).
         """
         loc_data, conf_data, priors = predictions
@@ -78,7 +80,7 @@ class MultiBoxLoss(nn.Module):
         conf_t = Variable(conf_t, requires_grad=False)
 
         pos = conf_t > 0
-        num_pos = pos.sum(keepdim=True)
+        num_pos = pos.sum(dim=1, keepdim=True)
 
         # Localization Loss (Smooth L1)
         # Shape: [batch,num_priors,4]
@@ -89,7 +91,6 @@ class MultiBoxLoss(nn.Module):
 
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes)
-
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
         # Hard Negative Mining
