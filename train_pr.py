@@ -1,6 +1,6 @@
 from data import *
 from utils.augmentations import SSDAugmentation
-from layers.modules import RecallLoss PrecisionLoss
+from layers.modules import RecallLoss, PrecisionLoss
 from ssd import build_ssd
 import os
 import sys
