@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
                     type=str, help='VOC or COCO')
-parser.add_argument('--dataset_root', default=VOC_ROOT,
+parser.add_argument('--dataset_root', default="data/VOCdevkit",
                     help='Dataset root directory path')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
@@ -81,8 +81,8 @@ def train():
                                 transform=SSDAugmentation(cfg['min_dim'],
                                                           MEANS))
     elif args.dataset == 'VOC':
-        if args.dataset_root == COCO_ROOT:
-            parser.error('Must specify dataset if specifying dataset_root')
+        #if args.dataset_root == COCO_ROOT:
+        #    parser.error('Must specify dataset if specifying dataset_root')
         cfg = voc
         dataset = VOCDetection(root=args.dataset_root,
                                transform=SSDAugmentation(cfg['min_dim'],
@@ -164,7 +164,11 @@ def train():
             adjust_learning_rate(optimizer, args.gamma, step_index)
 
         # load train data
-        images, targets = next(batch_iterator)
+        try:
+            images, targets = next(batch_iterator)
+        except StopIteration:
+            batch_iterator = iter(data_loader)
+            images, targets = next(batch_iterator)
 
         if args.cuda:
             images = Variable(images.cuda())
