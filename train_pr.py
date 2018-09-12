@@ -1,6 +1,6 @@
 from data import *
 from utils.augmentations import SSDAugmentation
-from layers.modules import MultiBoxLoss
+from layers.modules import RecallLoss PrecisionLoss
 from ssd import build_ssd
 import os
 import sys
@@ -119,8 +119,10 @@ def train():
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                           weight_decay=args.weight_decay)
-    criterion = MultiBoxLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
-                             False, args.cuda)
+    recall_criterion = RecallLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
+                         False, args.cuda)   
+    precision_criterion = PrecisionLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
+                         False, args.cuda)   
 
     net.train()
     # loss counters
@@ -175,7 +177,10 @@ def train():
         out = net(images)
         # backprop
         optimizer.zero_grad()
-        loss_l, loss_c = criterion(out, targets)
+        loss_l_r, loss_c_r = recall_criterion(out, targets)
+        loss_l_p, loss_c_p = precision_criterion(out, targets)
+        loss_l = loss_l_r + loss_l_p
+        loss_c = loss_c_r + loss_c_p
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()

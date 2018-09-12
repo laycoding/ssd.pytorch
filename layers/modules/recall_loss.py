@@ -7,7 +7,7 @@ from data import coco as cfg
 from ..box_utils import match, log_sum_exp
 
 
-class MultiBoxLoss(nn.Module):
+class RecallLoss(nn.Module):
     """SSD Weighted Loss Function
     Compute Targets:
         1) Produce Confidence Target Indices by matching  ground truth boxes
