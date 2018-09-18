@@ -1,6 +1,6 @@
 from data import *
 from utils.augmentations import SSDAugmentation
-from layers.modules import MultiBoxLoss
+from layers.modules import MultiBoxLoss, RecallLoss
 from ssd import build_ssd
 import os
 import sys
@@ -119,9 +119,10 @@ def train():
 
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                           weight_decay=args.weight_decay)
+    criterion = RecallLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
+                             False, args.cuda)
     criterion = MultiBoxLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
                              False, args.cuda)
-
     net.train()
     # loss counters
     loc_loss = 0

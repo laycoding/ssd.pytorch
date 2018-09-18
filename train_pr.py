@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(
 train_set = parser.add_mutually_exclusive_group()
 parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
                     type=str, help='VOC or COCO')
-parser.add_argument('--dataset_root', default="data/VOCdevkit",
+parser.add_argument('--dataset_root', default=VOC_ROOT,
                     help='Dataset root directory path')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
@@ -121,8 +121,7 @@ def train():
                           weight_decay=args.weight_decay)
     recall_criterion = RecallLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
                          False, args.cuda)   
-    precision_criterion = PrecisionLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
-                         False, args.cuda)   
+    precision_criterion = PrecisionLoss(cfg['num_classes'], 0.5, True, 0, 500, False, 0.3, 0.01, args.cuda)   
 
     net.train()
     # loss counters
@@ -183,8 +182,8 @@ def train():
         optimizer.zero_grad()
         loss_l_r, loss_c_r = recall_criterion(out, targets)
         loss_l_p, loss_c_p = precision_criterion(out, targets)
-        loss_l = loss_l_r + loss_l_p
-        loss_c = loss_c_r + loss_c_p
+        loss_p = loss_c_p + loss_l_p
+        loss_r = loss_c_r + loss_l_r
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()
@@ -194,7 +193,8 @@ def train():
 
         if iteration % 10 == 0:
             print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')
+            print('iter ' + repr(iteration) + ' || Percision Loss: %.4f ||' % (loss_p.data[0]), end=' ')
+            print('iter ' + repr(iteration) + ' || Recall_Loss: %.4f ||' % (loss_r.data[0]), end=' ')
 
         if args.visdom:
             update_vis_plot(iteration, loss_l.data[0], loss_c.data[0],

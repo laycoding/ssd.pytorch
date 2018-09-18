@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from data import coco as cfg
-from ..box_utils import match, log_sum_exp
+from ..box_utils import match, log_sum_exp, decode, nms
 
 
 class PrecisionLoss(nn.Module):
@@ -31,7 +31,7 @@ class PrecisionLoss(nn.Module):
     """
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
-                 bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
+                 bkg_label, top_k, encode_target, nms_thresh, conf_thresh,
                  use_gpu=True):
         super(PrecisionLoss, self).__init__()
         self.use_gpu = use_gpu
@@ -40,10 +40,13 @@ class PrecisionLoss(nn.Module):
         self.background_label = bkg_label
         self.encode_target = encode_target
         self.use_prior_for_matching = prior_for_matching
-        self.do_neg_mining = neg_mining
-        self.negpos_ratio = neg_pos
-        self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
+        self.top_k = top_k
+        if nms_thresh <= 0:
+            raise ValueError('nms_threshold must be non negative.')
+        self.nms_thresh = nms_thresh
+        self.softmax = nn.Softmax(dim=-1)
+        self.conf_thresh = conf_thresh
 
     def forward(self, predictions, targets):
         """Multibox Loss
@@ -60,12 +63,17 @@ class PrecisionLoss(nn.Module):
         loc_data, conf_data, priors = predictions
         num = loc_data.size(0)
         priors = priors[:loc_data.size(1), :]
+        # confused here, why stuck at loc_data size 1
         num_priors = (priors.size(0))
+#         prior_data = priors.view(1, num_priors, 4)
+#         print(prior_data.size())
         num_classes = self.num_classes
 
         # match priors (default boxes) and ground truth boxes
         loc_t = torch.Tensor(num, num_priors, 4)
-        conf_t = torch.LongTensor(num, num_priors)
+        # [num, num_priors, 4]
+        conf_t = torch.LongTensor(num, num_priors) 
+        # [num_priors] top class label for each prior
         for idx in range(num):
             truths = targets[idx][:, :-1].data
             labels = targets[idx][:, -1].data
@@ -78,40 +86,49 @@ class PrecisionLoss(nn.Module):
         # wrap targets
         loc_t = Variable(loc_t, requires_grad=False)
         conf_t = Variable(conf_t, requires_grad=False)
+        
+        conf_preds = self.softmax(conf_data.view(num, num_priors,
+                                    self.num_classes))
+        # print(conf_preds.max()) 0.9
+        conf_preds_trans = conf_preds.transpose(2,1)
+        # [num, num_classes, num_priors]
+        conf_p = torch.zeros(num, num_priors, num_classes)
+        # [num, num_priors, num_classes]
+        loc_p = torch.zeros(num, num_priors, 4)
+        # Decode predictions into bboxes
+        for i in range(num):
+#             print("shape of loc")
+#             print(loc_data[i].size())
+#             print("shape of prior")
+#             print(priors.size())            
+            decoded_boxes = decode(loc_data[i], priors, self.variance)
+            # For each class, perform nms
+            conf_scores = conf_preds_trans[i].clone()
+            for cl in range(1, self.num_classes):
+                c_mask = conf_scores[cl].gt(self.conf_thresh)
+                scores = conf_scores[cl][c_mask]
+                if scores.size(0) == 0:
+                    continue
+                # fliter low conf predictions
+                l_mask = c_mask.unsqueeze(1).expand_as(decoded_boxes)
+                boxes = Variable(decoded_boxes[l_mask].view(-1, 4), requires_grad=False)
+                # idx of highest scoring and non-overlapping boxes per class
+                # boxes [num_priors(has been flitered), 4] location preds for i'th image
+                ids, count = nms(boxes, scores, self.nms_thresh, self.top_k)
+                conf_p[i, ids, cl] = conf_preds[i, ids, cl] # [num, num_priors, num_classes]
+                loc_p[i, ids] = loc_data[i, ids] # [num, num_priors, 4]
+        # check each result if match the ground truth
+        effect_conf = conf_p != 0
+        effect_loc = loc_p != 0
+        num_effect = effect_loc.view(num, -1).sum(dim=1, keepdim=True)
+        # num_effect [num ,1]
+        conf_t = conf_t.view(num, num_priors, -1).expand_as(conf_p)
+        # [num_priors, num_classes]
+        loss_l = F.smooth_l1_loss(loc_p[effect_loc], loc_t[effect_loc], size_average=False)
+        loss_c = F.cross_entropy(conf_p[effect_conf], conf_t[effect_conf], size_average=False)
+        print(loss_c.size())
 
-        pos = conf_t > 0
-        num_pos = pos.sum(dim=1, keepdim=True)
-
-        # Localization Loss (Smooth L1)
-        # Shape: [batch,num_priors,4]
-        pos_idx = pos.unsqueeze(pos.dim()).expand_as(loc_data)
-        loc_p = loc_data[pos_idx].view(-1, 4)
-        loc_t = loc_t[pos_idx].view(-1, 4)
-        loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
-
-        # Compute max conf across batch for hard negative mining
-        batch_conf = conf_data.view(-1, self.num_classes)
-        loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
-
-        # Hard Negative Mining
-        loss_c = loss_c.view(num, -1)
-        loss_c[pos] = 0  # filter out pos boxes for now
-        _, loss_idx = loss_c.sort(1, descending=True)
-        _, idx_rank = loss_idx.sort(1)
-        num_pos = pos.long().sum(1, keepdim=True)
-        num_neg = torch.clamp(self.negpos_ratio*num_pos, max=pos.size(1)-1)
-        neg = idx_rank < num_neg.expand_as(idx_rank)
-
-        # Confidence Loss Including Positive and Negative Examples
-        pos_idx = pos.unsqueeze(2).expand_as(conf_data)
-        neg_idx = neg.unsqueeze(2).expand_as(conf_data)
-        conf_p = conf_data[(pos_idx+neg_idx).gt(0)].view(-1, self.num_classes)
-        targets_weighted = conf_t[(pos+neg).gt(0)]
-        loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
-
-        # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
-
-        N = num_pos.data.sum()
+        N = num_effect.data.sum()
         loss_l /= N.float()
         loss_c /= N.float()
         return loss_l, loss_c
