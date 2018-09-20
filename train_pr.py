@@ -171,33 +171,40 @@ def train():
 
         if args.cuda:
             images = Variable(images.cuda())
-            targets = [Variable(ann.cuda(), volatile=True) for ann in targets]
+            targets = [Variable(ann.cuda(), requires_grad=False) for ann in targets]
         else:
             images = Variable(images)
-            targets = [Variable(ann, volatile=True) for ann in targets]
+            targets = [Variable(ann, requires_grad=False) for ann in targets]
         # forward
         t0 = time.time()
         out = net(images)
         # backprop
         optimizer.zero_grad()
         loss_l_r, loss_c_r = recall_criterion(out, targets)
+        t3 = time.time()
         loss_l_p, loss_c_p = precision_criterion(out, targets)
+        t4 = time.time()
         loss_p = loss_c_p + loss_l_p
         loss_r = loss_c_r + loss_l_r
-        loss = loss_l + loss_c
+        loss = loss_p + loss_r
+        t2 = time.time()
         loss.backward()
         optimizer.step()
         t1 = time.time()
-        loc_loss += loss_l.data[0]
-        conf_loss += loss_c.data[0]
+        loc_loss += loss_p.item()
+        conf_loss += loss_r.item()
 
         if iteration % 10 == 0:
             print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Percision Loss: %.4f ||' % (loss_p.data[0]), end=' ')
-            print('iter ' + repr(iteration) + ' || Recall_Loss: %.4f ||' % (loss_r.data[0]), end=' ')
+#             print('timer: %.4f sec.' % (t2 - t0))
+#             print('timer: %.4f sec.' % (t3 - t0))
+#             print('timer: %.4f sec.' % (t4 - t3))
+#             print(loss_p.item())
+            print('iter ' + repr(iteration) + ' || Percision Loss: %.4f ||' % (loss_p.item()), end=' ')
+            print('iter ' + repr(iteration) + ' || Recall_Loss: %.4f ||' % (loss_r.item()), end=' ')
 
         if args.visdom:
-            update_vis_plot(iteration, loss_l.data[0], loss_c.data[0],
+            update_vis_plot(iteration, loss_l.item(), loss_c.item(),
                             iter_plot, epoch_plot, 'append')
 
         if iteration != 0 and iteration % 5000 == 0:

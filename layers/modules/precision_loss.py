@@ -61,10 +61,10 @@ class PrecisionLoss(nn.Module):
                 shape: [batch_size,num_objs,5] (last idx is the label).
         """
         loc_data, conf_data, priors = predictions
-        torch.save(loc_data, 'inter/loc_data.pt')
-        torch.save(conf_data, 'inter/conf_data.pt')
-        torch.save(priors, 'inter/priors.pt')
-        torch.save(targets, 'inter/targets.pt')
+#         torch.save(loc_data, 'inter/loc_data.pt')
+#         torch.save(conf_data, 'inter/conf_data.pt')
+#         torch.save(priors, 'inter/priors.pt')
+#         torch.save(targets, 'inter/targets.pt')
         num = loc_data.size(0)
         priors = priors[:loc_data.size(1), :]
         # confused here, why stuck at loc_data size 1
@@ -93,7 +93,7 @@ class PrecisionLoss(nn.Module):
         
         conf_preds = self.softmax(conf_data.view(num, num_priors,
                                     self.num_classes))
-        # print(conf_preds.max()) 0.9
+        # print(conf_preds.max()) 0.98
         conf_preds_trans = conf_preds.transpose(2,1)
         # [num, num_classes, num_priors]
         conf_p = torch.zeros(num, num_priors, num_classes).cuda()
@@ -128,7 +128,7 @@ class PrecisionLoss(nn.Module):
 #         torch.save(conf_p, 'inter/conf_p.pt')
 #         torch.save(conf_t, 'inter/conf_t.pt')
 #         torch.save(effect_conf, 'inter/effect_conf.pt')
-        loss_c = F.cross_entropy(conf_p[effect_conf].view(-1, num_classes), conf_t[effect_conf.sum(0)], size_average=False)
+        loss_c = F.cross_entropy(conf_p[effect_conf_idx].view(-1, num_classes), conf_t[effect_conf].view(-1), size_average=False)
         loss_l = F.smooth_l1_loss(loc_p[effect_loc_idx], loc_t[effect_loc_idx], size_average=False)
         # conf_p [num*num_p, num_classes] conf_t [num*num_p, 1(label)]
         N = effect_conf_idx.data.sum()
