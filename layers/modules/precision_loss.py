@@ -61,6 +61,10 @@ class PrecisionLoss(nn.Module):
                 shape: [batch_size,num_objs,5] (last idx is the label).
         """
         loc_data, conf_data, priors = predictions
+        torch.save(loc_data, 'inter/loc_data.pt')
+        torch.save(conf_data, 'inter/conf_data.pt')
+        torch.save(priors, 'inter/priors.pt')
+        torch.save(targets, 'inter/targets.pt')
         num = loc_data.size(0)
         priors = priors[:loc_data.size(1), :]
         # confused here, why stuck at loc_data size 1
@@ -92,15 +96,11 @@ class PrecisionLoss(nn.Module):
         # print(conf_preds.max()) 0.9
         conf_preds_trans = conf_preds.transpose(2,1)
         # [num, num_classes, num_priors]
-        conf_p = torch.zeros(num, num_priors, num_classes)
+        conf_p = torch.zeros(num, num_priors, num_classes).cuda()
         # [num, num_priors, num_classes]
-        loc_p = torch.zeros(num, num_priors, 4)
+        loc_p = torch.zeros(num, num_priors, 4).cuda()
         # Decode predictions into bboxes
-        for i in range(num):
-#             print("shape of loc")
-#             print(loc_data[i].size())
-#             print("shape of prior")
-#             print(priors.size())            
+        for i in range(num):           
             decoded_boxes = decode(loc_data[i], priors, self.variance)
             # For each class, perform nms
             conf_scores = conf_preds_trans[i].clone()
@@ -115,20 +115,23 @@ class PrecisionLoss(nn.Module):
                 # idx of highest scoring and non-overlapping boxes per class
                 # boxes [num_priors(has been flitered), 4] location preds for i'th image
                 ids, count = nms(boxes, scores, self.nms_thresh, self.top_k)
-                conf_p[i, ids, cl] = conf_preds[i, ids, cl] # [num, num_priors, num_classes]
-                loc_p[i, ids] = loc_data[i, ids] # [num, num_priors, 4]
+                conf_p[i, c_mask, cl] = conf_preds[i, c_mask, cl] # [num, num_priors, num_classes]
+                loc_p[i, l_mask[:,0].nonzero()[ids][:count]] = loc_data[i, l_mask[:,0].nonzero()[ids][:count]] # [num, num_priors, 4]
         # check each result if match the ground truth
-        effect_conf = conf_p != 0
-        effect_loc = loc_p != 0
-        num_effect = effect_loc.view(num, -1).sum(dim=1, keepdim=True)
-        # num_effect [num ,1]
-        conf_t = conf_t.view(num, num_priors, -1).expand_as(conf_p)
-        # [num_priors, num_classes]
-        loss_l = F.smooth_l1_loss(loc_p[effect_loc], loc_t[effect_loc], size_average=False)
-        loss_c = F.cross_entropy(conf_p[effect_conf], conf_t[effect_conf], size_average=False)
-        print(loss_c.size())
-
-        N = num_effect.data.sum()
+        effect_conf = conf_p.sum(2) != 0
+        effect_conf_idx = effect_conf.unsqueeze(2).expand_as(conf_p)
+        effect_loc_idx = effect_conf.unsqueeze(2).expand_as(loc_t)
+        # [num, num_priors, num_classes] binary metric, thousands will be True in million
+#         torch.save(conf_preds, 'inter/conf_preds.pt')
+#         torch.save(effect_conf, 'inter/effect_conf.pt')
+#         torch.save(effect_loc, 'inter/effect_loc.pt')
+#         torch.save(conf_p, 'inter/conf_p.pt')
+#         torch.save(conf_t, 'inter/conf_t.pt')
+#         torch.save(effect_conf, 'inter/effect_conf.pt')
+        loss_c = F.cross_entropy(conf_p[effect_conf].view(-1, num_classes), conf_t[effect_conf.sum(0)], size_average=False)
+        loss_l = F.smooth_l1_loss(loc_p[effect_loc_idx], loc_t[effect_loc_idx], size_average=False)
+        # conf_p [num*num_p, num_classes] conf_t [num*num_p, 1(label)]
+        N = effect_conf_idx.data.sum()
         loss_l /= N.float()
         loss_c /= N.float()
         return loss_l, loss_c

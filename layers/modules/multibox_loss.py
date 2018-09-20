@@ -61,8 +61,7 @@ class MultiBoxLoss(nn.Module):
         num = loc_data.size(0)
         print(priors.size())
         priors = priors[:loc_data.size(1), :]
-        print("shape of priors: ")
-        print(priors.size())
+#         print(priors.size()) #
         num_priors = (priors.size(0))
         num_classes = self.num_classes
 
@@ -82,9 +81,7 @@ class MultiBoxLoss(nn.Module):
         loc_t = Variable(loc_t, requires_grad=False)
         conf_t = Variable(conf_t, requires_grad=False)
 
-        pos = conf_t > 0
-        print("pos: ")
-        print(pos.size())
+        pos = conf_t > 0 # [num, num_priors]
         num_pos = pos.sum(dim=1, keepdim=True)
 
         # Localization Loss (Smooth L1)
@@ -92,6 +89,7 @@ class MultiBoxLoss(nn.Module):
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(loc_data)
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
+        print(loc_p.size(), loc_t.size())
         loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
         # Compute the location losses by loc_pred and loc_gt
 
@@ -142,6 +140,8 @@ class MultiBoxLoss(nn.Module):
 #         print(pos_idx.size())
 #         print(neg_idx.size())
         conf_p = conf_data[(pos_idx+neg_idx).gt(0)].view(-1, self.num_classes)
+        print(conf_data[(pos_idx+neg_idx).gt(0)].size())
+        print(pos_idx.size())
         # conf_data->[batch_size,num_priors,num_classes)] 
 #         print(conf_p.size())
 #         print((pos_idx+neg_idx).gt(0))
