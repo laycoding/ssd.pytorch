@@ -68,7 +68,7 @@ def jaccard(box_a, box_b):
     return inter / union  # [A,B]
 
 
-def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
+def match(threshold, truths, priors, variances, labels, loc_t, conf_t, overlap, idx):
     """Match each prior box with the ground truth box of the highest jaccard
     overlap, encode the bounding boxes, then return the matched indices
     corresponding to both confidence and location preds.
@@ -81,6 +81,7 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
         labels: (tensor) All the class labels for the image, Shape: [num_obj].
         loc_t: (tensor) Tensor to be filled w/ endcoded location targets.
         conf_t: (tensor) Tensor to be filled w/ matched indices for conf preds.
+        overlap: (tensor) Tensor to be filled w/ matched overlaps for preds
         idx: (int) current batch index
     Return:
         The matched indices corresponding to 1)location and 2)confidence preds.
@@ -96,37 +97,23 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
     # [1,num_priors] best ground truth for each prior
     best_truth_overlap, best_truth_idx = overlaps.max(0, keepdim=True)
     
-#     print("[1,num_objects] best prior for each ground truth")
-#     print(best_prior_overlap)
-#     print(best_prior_idx)
-#     print("[1,num_priors] best ground truth for each prior")
-#     print(best_prior_overlap)
-#     print(best_truth_idx)
-    
     best_truth_idx.squeeze_(0)
     best_truth_overlap.squeeze_(0)
     best_prior_idx.squeeze_(1)
     best_prior_overlap.squeeze_(1)
     best_truth_overlap.index_fill_(0, best_prior_idx, 2)  # ensure best prior
     
-#     print("after squeeze: ")
-#     print(best_truth_idx.size())
-#     print(best_truth_overlap.size())
-#     print(best_prior_idx.size())
-#     print(best_truth_overlap)
     # TODO refactor: index  best_prior_idx with long tensor
     # ensure every gt matches with its prior of max overlap
     for j in range(best_prior_idx.size(0)):
         best_truth_idx[best_prior_idx[j]] = j
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]
-#     print(best_truth_idx.size())
-#     print(matches.size())
     conf = labels[best_truth_idx] + 1         # Shape: [num_priors]
     conf[best_truth_overlap < threshold] = 0  # label as background
     loc = encode(matches, priors, variances)
-#     print(conf)
     loc_t[idx] = loc    # [num_priors,4] encoded offsets to learn
     conf_t[idx] = conf  # [num_priors] top class label for each prior
+    overlap[idx] = best_truth_overlap[0]
 
 def recall_match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
     """Match each prior box with the ground truth box of the highest jaccard

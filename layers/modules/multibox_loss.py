@@ -59,21 +59,20 @@ class MultiBoxLoss(nn.Module):
         """
         loc_data, conf_data, priors = predictions
         num = loc_data.size(0)
-        print(priors.size())
         priors = priors[:loc_data.size(1), :]
-#         print(priors.size()) #
         num_priors = (priors.size(0))
         num_classes = self.num_classes
 
         # match priors (default boxes) and ground truth boxes
         loc_t = torch.Tensor(num, num_priors, 4)
         conf_t = torch.LongTensor(num, num_priors) # [num_priors] top class label for each prior
+        overlap = torch.LongTensor(num, num_priors) # [num_priors] top overlap for each prior, assist conf_t
         for idx in range(num):
             truths = targets[idx][:, :-1].data
             labels = targets[idx][:, -1].data
             defaults = priors.data
             match(self.threshold, truths, defaults, self.variance, labels,
-                  loc_t, conf_t, idx)
+                  loc_t, conf_t, overlap, idx)
         if self.use_gpu:
             loc_t = loc_t.cuda()
             conf_t = conf_t.cuda()
@@ -89,38 +88,22 @@ class MultiBoxLoss(nn.Module):
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(loc_data)
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
-        print(loc_p.size(), loc_t.size())
         loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
         # Compute the location losses by loc_pred and loc_gt
 
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes) # conf data before softmax, usually has been normed
-#         print("shape of batch_conf")
-#         print(batch_conf.size())
-        # reshape the conf_data to ideal size
         # [num_priors * batch_size]
-#         print(log_sum_exp(batch_conf))
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
         # log_sum_exp(batch_conf) -> [num_priors * batch_size, 1]
         # conf_t.view(-1,1) -> [num_priors * batch_size, 1]
         # [num_priors * batch_size]
         # 这里并没有任何loss的运算啊，只是将每个prior的conf加起来然后减去gt的那一类的conf，也就是这个值的绝对值越小预测越好越大越差。
-#         print(batch_conf)
-#         print("bigest conf for each prior: ")
-#         print(batch_conf.gather(1, conf_t.view(-1, 1)))
-#         print(loss_c.size())
-#         neg = conf_t == 0
-#         print("neg: ")
-#         print(neg)
 
         # Hard Negative Mining
         # print(loss_c.size())
         loss_c = loss_c.view(num, -1)
         # size[batch_size, num_priors]
-        #  print(loss_c.size())
-#         print("fliter neg: ")
-#         loss_c[neg] = 0
-#         print(loss_c)
         loss_c[pos] = 0  # filter out pos boxes for now
         _, loss_idx = loss_c.sort(1, descending=True)
         _, idx_rank = loss_idx.sort(1)
@@ -129,33 +112,14 @@ class MultiBoxLoss(nn.Module):
         neg = idx_rank < num_neg.expand_as(idx_rank)
 
         # Confidence Loss Including Positive and Negative Examples
-#         print(pos.size())
-#         print(pos.unsqueeze(2).size())
         # conf shape: torch.size(batch_size,num_priors,num_classes)
         pos_idx = pos.unsqueeze(2).expand_as(conf_data)
         neg_idx = neg.unsqueeze(2).expand_as(conf_data)
         # duplicate the pos to (batch_size,num_priors,num_classes)
         # gt means greater than
-#         print(neg)
-#         print(pos_idx.size())
-#         print(neg_idx.size())
         conf_p = conf_data[(pos_idx+neg_idx).gt(0)].view(-1, self.num_classes)
-        print(conf_data[(pos_idx+neg_idx).gt(0)].size())
-        print(pos_idx.size())
         # conf_data->[batch_size,num_priors,num_classes)] 
-#         print(conf_p.size())
-#         print((pos_idx+neg_idx).gt(0))
 
-#         print(conf_data[(pos_idx+neg_idx).gt(0)].size())
-#         print("############")
-#         print(conf_data.size())
-        #print(conf_data)
-#         print((pos_idx+neg_idx).gt(0).size())
-        #print((pos_idx+neg_idx).gt(0))
-        # conf_t -> [priors]
-#         print("conf_t: ")
-#         print(conf_t.size())
-#         print([(pos+neg).gt(0)])
         targets_weighted = conf_t[(pos+neg).gt(0)]
         loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
 
